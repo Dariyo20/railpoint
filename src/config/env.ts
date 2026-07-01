@@ -1,0 +1,67 @@
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+function required(name: string, fallback?: string): string {
+  const v = process.env[name] ?? fallback;
+  if (v === undefined || v === '') {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return v;
+}
+
+function bool(name: string, fallback: boolean): boolean {
+  const v = process.env[name];
+  if (v === undefined) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(v.toLowerCase());
+}
+
+function int(name: string, fallback: number): number {
+  const v = process.env[name];
+  if (v === undefined || v === '') return fallback;
+  const n = Number(v);
+  if (Number.isNaN(n)) throw new Error(`Env var ${name} must be a number`);
+  return n;
+}
+
+function float(name: string, fallback: number): number {
+  return int(name, fallback);
+}
+
+export const env = {
+  nodeEnv: process.env.NODE_ENV ?? 'development',
+  isProd: process.env.NODE_ENV === 'production',
+  port: int('PORT', 4000),
+  logLevel: process.env.LOG_LEVEL ?? 'info',
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:4000',
+
+  mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/railpoint'),
+  redisUrl: required('REDIS_URL', 'redis://127.0.0.1:6379'),
+
+  nomba: {
+    mock: bool('MOCK_NOMBA', true),
+    baseUrl: process.env.NOMBA_BASE_URL ?? 'https://sandbox.nomba.com/v1',
+    // Parent accountId — goes in the `accountId` header on every call.
+    accountId: process.env.NOMBA_ACCOUNT_ID ?? '',
+    // Sub-account that collections are scoped to. When set, it is sent as
+    // `order.accountId` so funds settle into the sub-account.
+    subAccountId: process.env.NOMBA_SUBACCOUNT_ID ?? '',
+    clientId: process.env.NOMBA_CLIENT_ID ?? '',
+    clientSecret: process.env.NOMBA_CLIENT_SECRET ?? '',
+    webhookSignatureKey: process.env.NOMBA_WEBHOOK_SIGNATURE_KEY ?? '',
+    verifySignature: bool('WEBHOOK_VERIFY_SIGNATURE', true),
+  },
+
+  billing: {
+    tickMs: int('BILLING_TICK_MS', 60_000),
+    recoveryWindowDays: int('RECOVERY_WINDOW_DAYS', 10),
+    maxRecoveryAttempts: int('MAX_RECOVERY_ATTEMPTS', 4),
+    partialChargeFraction: float('PARTIAL_CHARGE_FRACTION', 0.5),
+    defaultPayday: int('DEFAULT_PAYDAY', 25),
+    demoFastRecovery: bool('DEMO_FAST_RECOVERY', true),
+  },
+
+  currency: 'NGN' as const,
+};
+
+export type Env = typeof env;
