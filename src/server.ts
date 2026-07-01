@@ -3,18 +3,29 @@ import { logger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
 import { buildApp } from './api/app';
 import { ensureDefaultMerchant } from './services/merchant';
+import { startBillingRuntime } from './services/billing/runtime';
 
 /**
- * The API server. Stateless and serverless-friendly. It enqueues BullMQ jobs but
- * does NOT process them — that is the worker's job (a long-running process).
+ * The API server.
+ *
+ * In the default no-Redis mode (QUEUE_DRIVER=memory) the billing runtime runs
+ * INSIDE this process — one command, no worker, no Redis, no Docker. In Redis
+ * mode the runtime lives in the separate worker process instead.
  */
 async function main() {
   await connectMongo();
   await ensureDefaultMerchant();
 
+  if (env.queueDriver === 'memory') {
+    await startBillingRuntime();
+    logger.info('Billing runtime embedded in API process (no Redis)');
+  } else {
+    logger.info('QUEUE_DRIVER=redis: run the worker process separately (npm run start:worker)');
+  }
+
   const app = buildApp();
   const server = app.listen(env.port, () => {
-    logger.info({ port: env.port, nomba: env.nomba.mock ? 'mock' : 'live' }, 'Railpoint API listening');
+    logger.info({ port: env.port, queue: env.queueDriver, nomba: env.nomba.mock ? 'mock' : 'live' }, 'Railpoint API listening');
   });
 
   const shutdown = async (signal: string) => {

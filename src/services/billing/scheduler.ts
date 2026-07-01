@@ -1,25 +1,14 @@
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { BillingCycleModel } from '../../models';
-import { billingQueue, JOB, enqueueChargeCycle } from './queues';
+import { jobsEngine } from './queue';
+import { JOB, enqueueChargeCycle } from './queues';
 
 /**
- * Register the repeatable billing tick. BullMQ guarantees only one delivery per
- * scheduled slot. We use a stable repeat key so re-registering on every worker
- * boot does not create duplicate schedules.
+ * Register the repeatable billing tick on the job engine.
  */
 export async function registerBillingTick(): Promise<void> {
-  const q = billingQueue();
-  await q.add(
-    JOB.TICK,
-    {},
-    {
-      repeat: { every: env.billing.tickMs },
-      jobId: 'billing-tick-repeatable',
-      removeOnComplete: true,
-      removeOnFail: true,
-    }
-  );
+  await jobsEngine().registerRepeatable(JOB.TICK, env.billing.tickMs);
   logger.info({ everyMs: env.billing.tickMs }, 'Billing tick registered');
 }
 

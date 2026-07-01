@@ -36,7 +36,11 @@ export const env = {
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:4000',
 
   mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/railpoint'),
-  redisUrl: required('REDIS_URL', 'redis://127.0.0.1:6379'),
+
+  // Job engine. Default 'memory' = in-process, NO Redis required. Set 'redis'
+  // (with a real REDIS_URL) only to scale out to multiple worker processes.
+  queueDriver: (process.env.QUEUE_DRIVER ?? 'memory').toLowerCase() === 'redis' ? 'redis' : 'memory',
+  redisUrl: process.env.REDIS_URL ?? '',
 
   nomba: {
     mock: bool('MOCK_NOMBA', true),

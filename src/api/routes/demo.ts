@@ -5,6 +5,7 @@ import { BillingCycleModel, SubscriptionModel } from '../../models';
 import { asyncHandler, ApiError, parseBody } from '../http';
 import { findOpenCycle, triggerCycleNow } from '../../services/billing/trigger';
 import { handleWebhook } from '../../services/webhook/handler';
+import { createFirstCycle } from '../../services/billing/cycleService';
 import { logger } from '../../config/logger';
 
 export const demoRouter = Router();
@@ -36,6 +37,31 @@ demoRouter.post(
     await BillingCycleModel.findByIdAndUpdate(cycleId, { dueDate: new Date() });
     const result = await triggerCycleNow(cycleId);
     res.status(202).json({ cycleId, ...result });
+  })
+);
+
+const activateSchema = z.object({ subscriptionId: z.string().min(1) });
+
+/**
+ * `POST /demo/activate` — DEMO ONLY. Simulates the Nomba payment_success
+ * activation (saves a token, activates, creates the first cycle) so the full
+ * flow can be walked from Postman without a real signed webhook. In production
+ * this happens via POST /webhooks/nomba.
+ */
+demoRouter.post(
+  '/demo/activate',
+  asyncHandler(async (req, res) => {
+    const { subscriptionId } = parseBody(activateSchema, req);
+    const sub = await SubscriptionModel.findById(subscriptionId).select('+tokenKey');
+    if (!sub) throw new ApiError(404, 'Subscription not found');
+    if (sub.status !== 'pending' && sub.tokenKey) {
+      return res.json({ subscriptionId, status: 'already active' });
+    }
+    sub.tokenKey = `demo-token-${randomUUID()}`;
+    sub.status = 'active';
+    await sub.save();
+    const cycle = await createFirstCycle(subscriptionId);
+    res.status(201).json({ subscriptionId, status: 'active', cycleId: cycle._id.toString() });
   })
 );
 

@@ -1,56 +1,31 @@
-import { Worker, Job } from 'bullmq';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { connectMongo, disconnectMongo } from './db/mongoose';
-import { buildRedisConnection } from './redis/connection';
-import { BILLING_QUEUE, JOB, ChargeCycleJob, RecoveryAttemptJob } from './services/billing/queues';
-import { registerBillingTick, processTick } from './services/billing/scheduler';
-import { processChargeCycle } from './services/billing/chargeCycle';
-import { runRecoveryAttempt } from './services/billing/recovery';
+import { startBillingRuntime } from './services/billing/runtime';
+import { jobsEngine } from './services/billing/queue';
 
 /**
- * The billing worker. This is a LONG-RUNNING process and CANNOT run on Vercel
- * serverless — deploy it on Render/Railway/Fly. It owns the repeatable billing
- * tick and processes charge-cycle and recovery-attempt jobs.
+ * Dedicated billing worker — for QUEUE_DRIVER=redis deployments where you scale
+ * the billing engine independently of the API. This is a LONG-RUNNING process.
+ *
+ * In the default no-Redis mode you do NOT need this: the API process runs the
+ * billing runtime in-process. This entry still works standalone in memory mode
+ * (useful for running only the engine), but memory jobs are per-process, so the
+ * API's enqueues would not reach a separate memory-mode worker — use Redis mode
+ * if you want them to be different processes.
  */
 async function main() {
   await connectMongo();
-  await registerBillingTick();
+  await startBillingRuntime();
 
-  const connection = buildRedisConnection();
-
-  const worker = new Worker(
-    BILLING_QUEUE,
-    async (job: Job) => {
-      switch (job.name) {
-        case JOB.TICK:
-          return processTick();
-        case JOB.CHARGE_CYCLE: {
-          const { cycleId, attemptNumber } = job.data as ChargeCycleJob;
-          return processChargeCycle(cycleId, attemptNumber);
-        }
-        case JOB.RECOVERY_ATTEMPT: {
-          const { cycleId, attemptNumber } = job.data as RecoveryAttemptJob;
-          return runRecoveryAttempt(cycleId, attemptNumber);
-        }
-        default:
-          logger.warn({ name: job.name }, 'Unknown job name');
-      }
-    },
-    { connection, concurrency: 5 }
-  );
-
-  worker.on('completed', (job) => logger.debug({ id: job.id, name: job.name }, 'Job completed'));
-  worker.on('failed', (job, err) =>
-    logger.error({ id: job?.id, name: job?.name, err: err?.message }, 'Job failed')
-  );
-  worker.on('error', (err) => logger.error({ err: err?.message }, 'Worker error'));
-
-  logger.info({ queue: BILLING_QUEUE, tickMs: env.billing.tickMs }, 'Railpoint worker started');
+  logger.info({ engine: env.queueDriver }, 'Railpoint worker started');
+  if (env.queueDriver === 'memory') {
+    logger.warn('QUEUE_DRIVER=memory: jobs are per-process. For a separate worker, set QUEUE_DRIVER=redis.');
+  }
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Worker shutting down');
-    await worker.close();
+    await jobsEngine().close();
     await disconnectMongo();
     process.exit(0);
   };

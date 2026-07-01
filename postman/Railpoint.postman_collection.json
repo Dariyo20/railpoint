@@ -1,0 +1,160 @@
+{
+  "info": {
+    "name": "Railpoint — Full Demo Walkthrough",
+    "description": "Walks the entire Railpoint demo end-to-end with no Redis and no Docker. Order: health -> create plan -> add member -> subscribe -> activate (demo) -> advance cycle (auto-charge) -> add 2nd member -> subscribe -> activate -> simulate failure -> advance (recovery: partial then clear) -> stats. Run the requests top to bottom (or use the Collection Runner). IDs are captured into collection variables automatically.\n\nStart the app first: `npm run dev:api` (MOCK_NOMBA=true, DEMO_FAST_RECOVERY=true).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "planId", "value": "" },
+    { "key": "aliceId", "value": "" },
+    { "key": "aliceSub", "value": "" },
+    { "key": "bobId", "value": "" },
+    { "key": "bobSub", "value": "" },
+    { "key": "bobCycle", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Health",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health" },
+      "event": [ { "listen": "test", "script": { "exec": [
+        "pm.test('healthy', () => pm.response.code === 200);",
+        "pm.test('queue is memory (no Redis)', () => pm.response.json().queue === 'memory');"
+      ] } } ]
+    },
+    {
+      "name": "1. Create plan",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/plans",
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Monthly Membership\",\n  \"amount\": 10000,\n  \"interval\": \"daily\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [
+        "const j = pm.response.json();",
+        "pm.collectionVariables.set('planId', j._id);",
+        "pm.test('plan created', () => pm.response.code === 201);"
+      ] } } ]
+    },
+    {
+      "name": "2. Add member — Alice (happy path)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/members",
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Alice Happy\",\n  \"email\": \"alice@example.com\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [
+        "pm.collectionVariables.set('aliceId', pm.response.json()._id);",
+        "pm.test('member created', () => pm.response.code === 201);"
+      ] } } ]
+    },
+    {
+      "name": "3. Subscribe Alice (create Nomba checkout order)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/subscriptions/initiate",
+        "body": { "mode": "raw", "raw": "{\n  \"planId\": \"{{planId}}\",\n  \"memberId\": \"{{aliceId}}\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [
+        "const j = pm.response.json();",
+        "pm.collectionVariables.set('aliceSub', j.subscriptionId);",
+        "pm.test('got checkout link', () => !!j.checkoutLink);",
+        "console.log('Alice checkoutLink:', j.checkoutLink);"
+      ] } } ]
+    },
+    {
+      "name": "4. Activate Alice (demo: stands in for the payment webhook)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/activate",
+        "body": { "mode": "raw", "raw": "{\n  \"subscriptionId\": \"{{aliceSub}}\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [ "pm.test('activated', () => pm.response.code === 201 || pm.response.code === 200);" ] } } ]
+    },
+    {
+      "name": "5. Advance Alice's cycle -> auto-charge (watch it succeed)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/advance",
+        "body": { "mode": "raw", "raw": "{\n  \"subscriptionId\": \"{{aliceSub}}\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [ "pm.test('charge triggered', () => pm.response.code === 202);" ] } } ]
+    },
+    {
+      "name": "6. Add member — Bob (recovery path, payday 25)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/members",
+        "body": { "mode": "raw", "raw": "{\n  \"name\": \"Bob Recovery\",\n  \"email\": \"bob@example.com\",\n  \"expectedPayday\": 25\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [ "pm.collectionVariables.set('bobId', pm.response.json()._id);" ] } } ]
+    },
+    {
+      "name": "7. Subscribe + activate Bob",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/subscriptions/initiate",
+        "body": { "mode": "raw", "raw": "{\n  \"planId\": \"{{planId}}\",\n  \"memberId\": \"{{bobId}}\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [
+        "pm.collectionVariables.set('bobSub', pm.response.json().subscriptionId);",
+        "const r = pm.sendRequest({ url: pm.collectionVariables.get('baseUrl') + '/demo/activate', method: 'POST', header: { 'Content-Type': 'application/json' }, body: { mode: 'raw', raw: JSON.stringify({ subscriptionId: pm.response.json().subscriptionId }) } }, (e, res) => { if (res) pm.collectionVariables.set('bobCycle', res.json().cycleId); });"
+      ] } } ]
+    },
+    {
+      "name": "8. Simulate failure on Bob (next full charges decline)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/simulate-failure",
+        "body": { "mode": "raw", "raw": "{\n  \"subscriptionId\": \"{{bobSub}}\",\n  \"fullFailures\": 2\n}" }
+      }
+    },
+    {
+      "name": "9. Advance Bob -> charge fails -> recovery starts",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/advance",
+        "body": { "mode": "raw", "raw": "{\n  \"subscriptionId\": \"{{bobSub}}\"\n}" }
+      },
+      "event": [ { "listen": "test", "script": { "exec": [ "pm.test('recovery triggered', () => pm.response.code === 202);" ] } } ]
+    },
+    {
+      "name": "10. Recovery view (Bob's cycle recovering / partial)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/cycles?status=recovering" }
+    },
+    {
+      "name": "11. Advance Bob again -> next recovery attempt (partial collected)",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/advance",
+        "body": { "mode": "raw", "raw": "{\n  \"cycleId\": \"{{bobCycle}}\"\n}" }
+      }
+    },
+    {
+      "name": "12. Advance Bob again -> balance clears",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "url": "{{baseUrl}}/demo/advance",
+        "body": { "mode": "raw", "raw": "{\n  \"cycleId\": \"{{bobCycle}}\"\n}" }
+      }
+    },
+    {
+      "name": "13. Dashboard: subscriptions (status + balances)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/subscriptions" }
+    },
+    {
+      "name": "14. Stats: total recovered (climbs during the demo)",
+      "request": { "method": "GET", "url": "{{baseUrl}}/stats" }
+    }
+  ]
+}

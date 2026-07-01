@@ -15,21 +15,30 @@ collection, and a virtual-account fallback — instead of giving up.
 
 ## Architecture
 
+**Runs with no Redis and no Docker.** By default the billing engine is an
+in-process scheduler (`setTimeout`/`setInterval`) that lives inside the API
+process — one command, one process, MongoDB only.
+
 ```
-Express API  ──enqueues──▶  BullMQ (Upstash Redis)  ──processed by──▶  Worker
-   │                                                                     │
-   ├── REST: plans, members, subscriptions, webhook, demo               ├── billing tick (repeatable)
-   │                                                                     ├── charge-cycle jobs
-   └── MongoDB (Mongoose) ◀───────────state────────────────────────────┤── recovery-attempt jobs
-                                                                         │
-              All Nomba calls go through ONE adapter: src/services/nomba/
+                     ┌──────────────── API process ─────────────────┐
+  REST + webhook ──▶ │  Express routes                              │
+                     │  In-process job engine (QUEUE_DRIVER=memory):│
+                     │    - billing tick (repeatable)               │
+                     │    - charge-cycle + recovery-attempt jobs    │
+                     └──────────────────┬───────────────────────────┘
+                                        │ state
+                                 MongoDB (Mongoose)
+
+         All Nomba calls go through ONE adapter: src/services/nomba/
 ```
 
-- **API server** (`src/server.ts`) — stateless, serverless-friendly. Handles REST
-  and the Nomba webhook. Enqueues jobs but never processes them.
-- **Worker** (`src/worker.ts`) — **a long-running process, NOT serverless.** Owns
-  the repeatable billing tick and processes charge/recovery jobs. Deploy on
-  Render / Railway / Fly, never on Vercel.
+- **Default (`QUEUE_DRIVER=memory`)** — no Redis, no Docker. `npm run dev:api`
+  runs the API *and* the billing engine in the same process. This is all you need
+  to run and demo Railpoint.
+- **Optional scale-out (`QUEUE_DRIVER=redis`)** — swaps the in-process engine for
+  BullMQ on Redis so the billing engine can run as a separate long-running worker
+  (`src/worker.ts`) on Render / Railway / Fly. Only then is `REDIS_URL` used. The
+  billing logic is identical either way (`src/services/billing/queue/`).
 
 ### Project layout
 
@@ -37,7 +46,7 @@ Express API  ──enqueues──▶  BullMQ (Upstash Redis)  ──processed by
 |------|---------|
 | `src/services/nomba/` | **The only place that talks to Nomba.** Auth (token cache + auto-refresh), `createCheckoutOrder`, `chargeToken`, `createVirtualAccount`, `listTokenizedCards`. Honours `MOCK_NOMBA`. |
 | `src/services/webhook/` | Signature verification + idempotent event handler. |
-| `src/services/billing/` | BullMQ queues, billing tick, charge-cycle, Smart Recovery engine, virtual-account fallback. |
+| `src/services/billing/` | Job engine (in-memory default / optional Redis), billing tick, charge-cycle, Smart Recovery engine, virtual-account fallback. |
 | `src/models/` | All Mongoose models from the PRD. |
 | `src/api/` | Express app + routes. |
 
@@ -46,8 +55,9 @@ Express API  ──enqueues──▶  BullMQ (Upstash Redis)  ──processed by
 ## Prerequisites
 
 - Node 20+
-- MongoDB
-- Redis (Upstash in production; any Redis locally)
+- MongoDB (local or a free MongoDB Atlas cluster)
+- **No Redis, no Docker required** in the default mode. (Redis is only needed if
+  you opt into `QUEUE_DRIVER=redis`.)
 
 ## Setup
 
@@ -63,17 +73,48 @@ Nomba vars to hit the real API.
 
 ## Running
 
-The API and the worker are **two separate processes**.
+Default mode is **one process, no Redis**:
 
 ```bash
-# terminal 1 — API
 npm run dev:api      # or: npm run build && npm run start:api
-
-# terminal 2 — worker (long-running; do NOT put this on serverless)
-npm run dev:worker   # or: npm run build && npm run start:worker
 ```
 
-Health check: `GET http://localhost:4000/health`.
+This starts the API and the embedded billing engine together. Health check:
+`GET http://localhost:4000/health` (shows `"queue":"memory"`).
+
+<details>
+<summary>Optional: Redis scale-out (two processes)</summary>
+
+Set `QUEUE_DRIVER=redis` and `REDIS_URL=...`, then run the API and the worker
+separately:
+
+```bash
+npm run dev:api      # enqueues jobs
+npm run dev:worker   # long-running billing worker (Render/Railway/Fly, not serverless)
+```
+</details>
+
+## Tests
+
+```bash
+npm test
+```
+
+Jest + the in-memory job engine — **no Docker, no Redis**. 39 tests across 9
+suites cover the Nomba adapter + token cache/refresh, model state transitions,
+webhook signature security, idempotency (double webhook, double charge), and the
+full Smart Recovery arc (fail → partial → clear, and window-exhaust → virtual
+account → credit).
+
+The suite needs a MongoDB to talk to. It picks one automatically:
+
+- If `TEST_MONGODB_URI` is set, it uses that (fastest, recommended):
+  ```bash
+  TEST_MONGODB_URI="mongodb+srv://.../railpoint_test" npm test
+  ```
+- Otherwise it spins up `mongodb-memory-server` (downloads a MongoDB binary on
+  first run — still no Docker, just a one-time ~large download; slow networks
+  should prefer `TEST_MONGODB_URI`).
 
 ### Seed a ready-to-demo dataset
 
@@ -89,7 +130,8 @@ Prints the ids you need for the demo.
 
 ## The 60-second demo
 
-With the worker running and `MOCK_NOMBA=true`, `DEMO_FAST_RECOVERY=true`:
+With the app running (`npm run dev:api`) and `MOCK_NOMBA=true`,
+`DEMO_FAST_RECOVERY=true`:
 
 1. **Subscribe** (or `npm run seed`). For a manual subscribe:
    ```bash
@@ -216,9 +258,11 @@ All calls send `Authorization: Bearer <jwt>` and an `accountId` header.
 
 ## Deployment
 
-- **API** → Vercel / Render / Railway (stateless).
-- **Worker** → Render / Railway / Fly **as a long-running service**. It must stay
-  up to run the billing tick and process delayed recovery jobs. Point both at the
-  same MongoDB and the same Upstash Redis.
+- **Default (memory engine):** deploy the API as a single **long-running**
+  service (Render / Railway / Fly) — it runs the billing engine in-process, so
+  the timers stay alive. Point it at MongoDB. No Redis. (Avoid scale-to-zero
+  serverless here, since the in-process tick must keep running.)
+- **Redis scale-out (optional):** set `QUEUE_DRIVER=redis` + `REDIS_URL`, deploy
+  the API and a separate `worker` process, both on the same MongoDB and Redis.
 - Configure the Nomba dashboard webhook URL to `https://<api-host>/webhooks/nomba`
   and set the same signature key in `NOMBA_WEBHOOK_SIGNATURE_KEY`.

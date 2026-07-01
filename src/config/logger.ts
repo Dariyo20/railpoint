@@ -26,12 +26,15 @@ export const logger = pino({
     censor: '[REDACTED]',
   },
   base: { service: 'railpoint' },
-  transport: env.isProd
-    ? undefined
-    : {
-        target: 'pino-pretty',
-        options: { colorize: true, translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname,service' },
-      },
+  // Pretty transport only in local development. In test/prod use plain JSON so
+  // no worker-thread transport is spawned (keeps Jest from hanging).
+  transport:
+    env.nodeEnv === 'development'
+      ? {
+          target: 'pino-pretty',
+          options: { colorize: true, translateTime: 'SYS:HH:MM:ss', ignore: 'pid,hostname,service' },
+        }
+      : undefined,
 });
 
 export type Logger = typeof logger;

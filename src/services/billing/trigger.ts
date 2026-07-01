@@ -26,10 +26,7 @@ export async function triggerCycleNow(cycleId: string): Promise<{ triggered: str
       attemptNumber: 1,
     });
     if (next) {
-      await enqueueRecoveryAttempt(
-        { cycleId, attemptNumber: next.attemptNumber },
-        { delay: 0, jobId: undefined }
-      );
+      await enqueueRecoveryAttempt({ cycleId, attemptNumber: next.attemptNumber }, { delay: 0 });
       return { triggered: 'recovery-attempt', detail: `attempt ${next.attemptNumber}` };
     }
     return { triggered: 'none', detail: 'no pending recovery attempt' };
