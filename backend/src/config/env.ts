@@ -33,7 +33,9 @@ export const env = {
   isProd: process.env.NODE_ENV === 'production',
   port: int('PORT', 4000),
   logLevel: process.env.LOG_LEVEL ?? 'info',
-  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:4000',
+  // On Render, RENDER_EXTERNAL_URL is injected automatically, so the Nomba
+  // callbackUrl is correct with no manual config.
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? process.env.RENDER_EXTERNAL_URL ?? 'http://localhost:4000',
 
   mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/railpoint'),
 

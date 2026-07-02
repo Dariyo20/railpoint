@@ -1,0 +1,66 @@
+# Render Blueprint for Railpoint.
+# One web service — no Redis, no worker (the billing engine runs in-process via
+# QUEUE_DRIVER=memory). Deploy: Render Dashboard -> New -> Blueprint -> pick this
+# repo, or `render blueprint launch` with the Render CLI.
+#
+# Secrets (MongoDB URI, Nomba creds, webhook key) are marked `sync: false` so
+# they are NEVER committed — you set them once in the Render dashboard.
+
+services:
+  - type: web
+    name: railpoint-api
+    runtime: node
+    rootDir: backend
+    plan: free # NOTE: free web services spin down when idle, which pauses the
+    #            in-process billing tick. Use `starter` (or higher) for an
+    #            always-on billing engine.
+    region: oregon
+    branch: main
+    # --include=dev so TypeScript (a devDependency) is available at build time
+    # even though NODE_ENV=production would otherwise omit it.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start:api
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      # In-process job engine — no Redis required.
+      - key: QUEUE_DRIVER
+        value: memory
+      # true = runs fully offline with sandbox-like responses (safe first deploy).
+      # Flip to false once your Nomba creds + sandbox/live URL are set below.
+      - key: MOCK_NOMBA
+        value: "true"
+      - key: DEMO_FAST_RECOVERY
+        value: "true"
+      - key: BILLING_TICK_MS
+        value: "60000"
+      - key: RECOVERY_WINDOW_DAYS
+        value: "10"
+      - key: MAX_RECOVERY_ATTEMPTS
+        value: "4"
+      - key: PARTIAL_CHARGE_FRACTION
+        value: "0.5"
+      - key: DEFAULT_PAYDAY
+        value: "25"
+      # Keep false until you set a webhook signature key, or signed webhooks are rejected.
+      - key: WEBHOOK_VERIFY_SIGNATURE
+        value: "false"
+      # ── Secrets — set these in the Render dashboard (not committed) ──
+      - key: MONGODB_URI
+        sync: false
+      - key: NOMBA_BASE_URL
+        sync: false
+      - key: NOMBA_ACCOUNT_ID
+        sync: false
+      - key: NOMBA_SUBACCOUNT_ID
+        sync: false
+      - key: NOMBA_CLIENT_ID
+        sync: false
+      - key: NOMBA_CLIENT_SECRET
+        sync: false
+      - key: NOMBA_WEBHOOK_SIGNATURE_KEY
+        sync: false
