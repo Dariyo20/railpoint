@@ -8,6 +8,7 @@ import {
 import { listTokenizedCards } from '../nomba';
 import { fromNombaAmount } from '../nomba/amount';
 import { applyCollection, createFirstCycle, setSubscriptionStatus } from '../billing/cycleService';
+import { encryptToken } from '../crypto/token';
 
 export interface HandleResult {
   status: 'duplicate' | 'ignored' | 'activated' | 'va_credited' | 'unhandled';
@@ -139,7 +140,7 @@ async function handlePaymentSuccess(payload: any): Promise<HandleResult> {
     return { status: 'ignored', detail: 'payment_success but no tokenKey could be resolved' };
   }
 
-  sub.tokenKey = tokenKey;
+  sub.tokenKey = encryptToken(tokenKey); // encrypted at rest
   sub.status = 'active';
   await sub.save();
 

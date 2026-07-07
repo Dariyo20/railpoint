@@ -216,15 +216,81 @@ scheduled ──charge ok──────────────▶ paid
 
 ---
 
+## Authentication
+
+Management endpoints require a **merchant API key** (`API_KEY`). Send it as
+either header:
+
+```
+Authorization: Bearer <API_KEY>
+# or
+x-api-key: <API_KEY>
+```
+
+- **Public (no key):** `GET /health`, `POST /webhooks/nomba` (protected by the
+  Nomba signature instead), `GET /checkout/return`.
+- **Protected (key required):** everything else — plans, members, subscriptions,
+  cycles, stats, demo.
+- If `API_KEY` is left blank, auth is **disabled** (local dev only) and a startup
+  warning is logged. Generate one with:
+  `node -e "console.log('rp_live_'+require('crypto').randomBytes(24).toString('base64url'))"`
+
+`/demo/*` endpoints are additionally gated by `ENABLE_DEMO_ROUTES` — keep `true`
+for the graded demo, set `false` in a real production deploy (they can activate a
+subscription without a real payment).
+
+## How a business owner uses Railpoint
+
+1. **Set up once** (authenticated with the API key): `POST /plans` to define a
+   membership, `POST /members` to add a member.
+2. **Member subscribes:** `POST /subscriptions/initiate` returns a Nomba
+   `checkoutLink`; the member pays once and the card is tokenized.
+3. **Nomba fires `payment_success`** → Railpoint saves the (encrypted) token,
+   activates the subscription, opens the first billing cycle.
+4. **Auto-charge:** the in-process billing tick charges the saved token each
+   cycle — no human action.
+5. **On failure:** the Smart Recovery engine takes over (payday-aware retries →
+   partial collection → virtual-account fallback). The dashboard reads
+   `GET /subscriptions`, `GET /cycles?status=recovering`, and `GET /stats`.
+
+The business owner never handles card data — only the plan, the member, and the
+dashboard.
+
+## Setting up the Nomba webhook (production)
+
+1. Deploy, note your URL (e.g. `https://railpoint.onrender.com`).
+2. Nomba Dashboard → **Developer → Webhook Setup** → add
+   `https://<your-host>/webhooks/nomba`, subscribe to `payment_success`, and set a
+   **signature key** (any strong random string you choose).
+3. Put that same key in `NOMBA_WEBHOOK_SIGNATURE_KEY`, set
+   `WEBHOOK_VERIFY_SIGNATURE=true`, and `MOCK_NOMBA=false`.
+4. Submit your webhook URL + sub-account to Nomba as instructed.
+
+## Why "mock" / "demo"?
+
+- **`MOCK_NOMBA=true`** makes the Nomba adapter return deterministic,
+  sandbox-like responses, so the whole system runs and demos **offline** with no
+  credentials — useful for local dev, CI, and a guaranteed-working graded demo.
+  Set it to `false` to hit the real Nomba API.
+- **`/demo/*` endpoints** exist because a monthly billing cycle and a real card
+  payment are slow to show live. `/demo/advance` fires a cycle now,
+  `/demo/simulate-failure` forces a decline so the recovery arc is visible in
+  seconds, and `/demo/activate` stands in for the payment webhook when running
+  with the mock. In real operation, activation happens via `POST /webhooks/nomba`,
+  not `/demo/activate`.
+
 ## Security & hygiene
 
-- **`tokenKey` is never logged and never returned in any API response.** It is
-  stored with Mongoose `select: false`, and the Pino logger redacts `tokenKey`,
-  `access_token`, `refresh_token`, `client_secret` and `authorization`
-  everywhere.
-- **Webhook signatures are verified** on every call (`src/services/webhook/verify.ts`)
-  and unsigned/mismatched requests are rejected with 401. The implementation is
+- **API-key auth** on all management endpoints (see above), plus `helmet`
+  security headers, CORS (`CORS_ORIGIN`), and a 300 req/min rate limit.
+- **`tokenKey` is encrypted at rest** (AES-256-GCM via `TOKEN_ENCRYPTION_KEY`),
+  never logged, and never returned in any API response (`select: false` + Pino
+  redaction of `tokenKey`, `access_token`, `refresh_token`, `client_secret`,
+  `authorization`).
+- **Webhook signatures are verified** on every call (`src/services/webhook/verify.ts`),
   unit-checked against Nomba's official signature test vector.
+- **Restart-durable recovery:** the billing tick re-enqueues any due, still-pending
+  recovery attempt, so in-memory delayed jobs survive a redeploy/restart.
 - All secrets are in env vars; nothing is committed. See `.env.example`.
 
 ---

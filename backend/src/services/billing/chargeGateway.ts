@@ -2,6 +2,7 @@ import { logger } from '../../config/logger';
 import { BillingCycle, Charge, ChargeModel, Subscription, SubscriptionModel } from '../../models';
 import { chargeToken } from '../nomba';
 import { FailureReason } from '../../models/Charge';
+import { decryptToken } from '../crypto/token';
 
 /**
  * Wraps a single card-charge attempt: applies the /demo/simulate-failure
@@ -66,7 +67,7 @@ export async function attemptCharge(input: AttemptChargeInput): Promise<AttemptC
       simulated: true,
     };
   } else {
-    const tokenKey = subscription.tokenKey;
+    const tokenKey = decryptToken(subscription.tokenKey); // decrypt at rest
     if (!tokenKey) throw new Error(`Subscription ${subscription._id} has no tokenKey`);
     const member = await getCustomerEmail(subscription);
     result = await chargeToken({

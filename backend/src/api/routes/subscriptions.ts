@@ -81,11 +81,15 @@ subscriptionsRouter.post(
  */
 subscriptionsRouter.get(
   '/subscriptions',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const skip = Math.max(Number(req.query.skip) || 0, 0);
     const subs = await SubscriptionModel.find()
       .populate('memberId')
       .populate('planId')
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .lean();
 
     const out = await Promise.all(

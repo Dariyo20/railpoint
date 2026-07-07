@@ -49,7 +49,18 @@ services:
       # Keep false until you set a webhook signature key, or signed webhooks are rejected.
       - key: WEBHOOK_VERIFY_SIGNATURE
         value: "false"
+      - key: CORS_ORIGIN
+        value: "*"
+      # Keep true for the graded demo; set false for a real production deploy.
+      - key: ENABLE_DEMO_ROUTES
+        value: "true"
       # ── Secrets — set these in the Render dashboard (not committed) ──
+      # Merchant API key — required to call management endpoints.
+      - key: API_KEY
+        sync: false
+      # Encrypts the card tokenKey at rest.
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
       - key: MONGODB_URI
         sync: false
       - key: NOMBA_BASE_URL
