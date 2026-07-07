@@ -39,6 +39,20 @@ export const env = {
 
   mongoUri: required('MONGODB_URI', 'mongodb://127.0.0.1:27017/railpoint'),
 
+  // ── Security ──────────────────────────────────────────────────────────────
+  // Merchant API key. When set, all management endpoints require it
+  // (Authorization: Bearer <key> or x-api-key). When BLANK, auth is disabled
+  // (local dev / tests) and a startup warning is logged.
+  apiKey: process.env.API_KEY ?? '',
+  // Encrypts the card tokenKey at rest (AES-256-GCM). When blank, tokens are
+  // stored as-is (dev). Any string works — it is hashed to a 32-byte key.
+  tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY ?? '',
+  // Comma-separated allowed CORS origins for the dashboard. '*' allows all.
+  corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  // Demo/simulation endpoints (/demo/*). Keep ON for the graded demo; turn OFF
+  // in a real production deployment (they can activate without payment).
+  enableDemoRoutes: bool('ENABLE_DEMO_ROUTES', true),
+
   // Job engine. Default 'memory' = in-process, NO Redis required. Set 'redis'
   // (with a real REDIS_URL) only to scale out to multiple worker processes.
   queueDriver: (process.env.QUEUE_DRIVER ?? 'memory').toLowerCase() === 'redis' ? 'redis' : 'memory',

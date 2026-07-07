@@ -6,6 +6,7 @@ import { asyncHandler, ApiError, parseBody } from '../http';
 import { findOpenCycle, triggerCycleNow } from '../../services/billing/trigger';
 import { handleWebhook } from '../../services/webhook/handler';
 import { createFirstCycle } from '../../services/billing/cycleService';
+import { encryptToken } from '../../services/crypto/token';
 import { logger } from '../../config/logger';
 
 export const demoRouter = Router();
@@ -57,7 +58,7 @@ demoRouter.post(
     if (sub.status !== 'pending' && sub.tokenKey) {
       return res.json({ subscriptionId, status: 'already active' });
     }
-    sub.tokenKey = `demo-token-${randomUUID()}`;
+    sub.tokenKey = encryptToken(`demo-token-${randomUUID()}`);
     sub.status = 'active';
     await sub.save();
     const cycle = await createFirstCycle(subscriptionId);

@@ -13,6 +13,12 @@ process.env.DEMO_FAST_RECOVERY = process.env.DEMO_FAST_RECOVERY ?? 'false';
 process.env.MAX_RECOVERY_ATTEMPTS = process.env.MAX_RECOVERY_ATTEMPTS ?? '4';
 process.env.RECOVERY_WINDOW_DAYS = process.env.RECOVERY_WINDOW_DAYS ?? '10';
 process.env.PARTIAL_CHARGE_FRACTION = process.env.PARTIAL_CHARGE_FRACTION ?? '0.5';
+// Auth + encryption OFF by default so the suite runs open; the dedicated
+// auth/crypto tests opt in by mutating the `env` object at runtime.
+process.env.API_KEY = '';
+process.env.TOKEN_ENCRYPTION_KEY = '';
+process.env.ENABLE_DEMO_ROUTES = 'true';
+process.env.CORS_ORIGIN = '*';
 
 import mongoose from 'mongoose';
 import { __setEngine } from '../src/services/billing/queue';

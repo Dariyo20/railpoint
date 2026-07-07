@@ -23,7 +23,8 @@ cyclesRouter.get(
       filter.status = status; // pass-through (may return empty)
     }
 
-    const cycles = await BillingCycleModel.find(filter).sort({ updatedAt: -1 }).lean();
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const cycles = await BillingCycleModel.find(filter).sort({ updatedAt: -1 }).limit(limit).lean();
     res.json(
       cycles.map((c: any) => ({
         ...c,
